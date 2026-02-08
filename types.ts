@@ -12,7 +12,7 @@ export interface Scene {
   isLoadingTextOverlay?: boolean;
   isRefining?: boolean;
   error?: string;
-  statusMessage?: string; // For rate limit countdowns or specific status updates
+  statusMessage?: string;
 }
 
 export enum AppState {
@@ -29,4 +29,24 @@ export interface AnalysisResponse {
     visualDescription: string;
     imagePrompt: string;
   }[];
+}
+
+export interface ScriptBlock {
+  id: string;
+  text: string;
+  isEditing: boolean;
+}
+
+export interface AudioSettings {
+  voiceId: string;
+  voiceName: string;
+  stability: number;
+  similarityBoost: number;
+  speed: number;
+}
+
+export interface GeneratedAudio {
+  url: string;
+  duration: number;
+  text: string;
 }
