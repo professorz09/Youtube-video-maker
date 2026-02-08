@@ -1,9 +1,18 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import ScriptInput from './components/ScriptInput';
 import SceneDashboard from './components/SceneDashboard';
+import ScriptEditor from './components/ScriptEditor';
 import { Scene, AppState } from './types';
 import { analyzeScript, generateSceneImage, refinePrompt, generateTextOverlay } from './services/geminiService';
+import { 
+  CheckCircleIcon, 
+  PencilSquareIcon, 
+  Squares2X2Icon, 
+  ChevronRightIcon 
+} from '@heroicons/react/24/solid';
+
+type Step = 'input' | 'editor' | 'visuals';
 
 const App: React.FC = () => {
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -13,6 +22,10 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [isGeneratingAllText, setIsGeneratingAllText] = useState(false);
+  
+  // State for Flow
+  const [fullScript, setFullScript] = useState<string>("");
+  const [currentStep, setCurrentStep] = useState<Step>('input');
 
   // Helper to update a specific scene
   const updateScene = (id: number, updates: Partial<Scene>) => {
@@ -44,10 +57,20 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAnalysis = useCallback(async (scriptText: string, model: string) => {
+  // 1. Handle Input (Paste or Generate) -> Go to Editor
+  const handleScriptReady = (scriptText: string) => {
+    setFullScript(scriptText);
+    setCurrentStep('editor');
+    // We don't analyze yet, we let user refine in Editor first
+  };
+
+  // 2. Handle Analyze (From Editor) -> Go to Visuals
+  const handleAnalyzeFromEditor = useCallback(async (scriptText: string, model: string = 'gemini-3-flash-preview') => {
+    setFullScript(scriptText);
     setAppState(AppState.ANALYZING);
     setError(null);
     setScenes([]);
+    setCurrentStep('visuals');
 
     try {
       const result = await analyzeScript(scriptText, model);
@@ -72,6 +95,7 @@ const App: React.FC = () => {
       console.error(err);
       setError(err.message || "Something went wrong.");
       setAppState(AppState.ERROR);
+      // Stay on visuals page to show error or allow retry
     }
   }, []);
 
@@ -112,8 +136,6 @@ const App: React.FC = () => {
     setIsGeneratingAllText(false);
   };
 
-  // --- Smart Image Generation Logic ---
-
   const generateSingleImageWithRetry = async (id: number, prompt: string) => {
     let attempts = 0;
     const maxAttempts = 5; 
@@ -123,57 +145,42 @@ const App: React.FC = () => {
         updateScene(id, { isLoadingImage: true, error: undefined, statusMessage: attempts > 0 ? "Retrying..." : undefined });
         const imageUrl = await generateSceneImage(prompt);
         updateScene(id, { imageUrl, isLoadingImage: false, statusMessage: undefined });
-        return; // Success
+        return; 
       } catch (err: any) {
         attempts++;
         const errMsg = err.message || JSON.stringify(err);
         
-        // CHECK 1: Daily Quota Limit (HARD STOP)
         if (errMsg.includes("generate_requests_per_model_per_day")) {
-          console.error(`Daily Quota Exceeded for scene ${id}.`);
           updateScene(id, { isLoadingImage: false, error: "Daily Quota Exceeded", statusMessage: "Daily Limit Reached" });
-          return; // Do not retry
+          return;
         }
 
-        // CHECK 2: Rate Limit (WAIT AND RETRY)
         if (errMsg.includes("429") || errMsg.includes("quota")) {
-          // Extract wait time
           const match = errMsg.match(/retry in ([\d\.]+)s/);
-          let waitTimeMs = 30000; // Default 30s
+          let waitTimeMs = 30000;
           if (match && match[1]) {
-            waitTimeMs = Math.ceil(parseFloat(match[1])) * 1000 + 1000; // Add 1s buffer
+            waitTimeMs = Math.ceil(parseFloat(match[1])) * 1000 + 1000;
           }
-          
-          console.log(`Rate limit hit for scene ${id}. Waiting ${waitTimeMs}ms.`);
-          
-          // Countdown timer for UI
-          const startTime = Date.now();
-          const endTime = startTime + waitTimeMs;
-          
+          const endTime = Date.now() + waitTimeMs;
           while (Date.now() < endTime) {
             const remaining = Math.ceil((endTime - Date.now()) / 1000);
             updateScene(id, { statusMessage: `Rate limit hit. Retrying in ${remaining}s...` });
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
-          continue; // Retry loop
+          continue;
         }
 
-        // CHECK 3: Model Overloaded (503) (WAIT AND RETRY)
         if (errMsg.includes("503") || errMsg.includes("overloaded") || errMsg.includes("UNAVAILABLE")) {
-          const waitTimeMs = 5000 * attempts; // Linear backoff for overload
-          console.log(`Model overloaded for scene ${id}. Waiting ${waitTimeMs}ms.`);
-          
-          const startTime = Date.now();
-          const endTime = startTime + waitTimeMs;
+          const waitTimeMs = 5000 * attempts;
+          const endTime = Date.now() + waitTimeMs;
           while (Date.now() < endTime) {
              const remaining = Math.ceil((endTime - Date.now()) / 1000);
              updateScene(id, { statusMessage: `Model busy (503). Retrying in ${remaining}s...` });
              await new Promise(resolve => setTimeout(resolve, 1000));
           }
-          continue; // Retry loop
+          continue;
         }
         
-        // If permission error
         if (errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
            setError("Permission denied. Select API Key.");
            setHasApiKey(false);
@@ -181,20 +188,16 @@ const App: React.FC = () => {
            return;
         }
 
-        // Other errors
         console.error(`Error generating scene ${id}:`, err);
         updateScene(id, { isLoadingImage: false, error: "Failed", statusMessage: undefined });
         return;
       }
     }
-    
     updateScene(id, { isLoadingImage: false, error: "Max Retries Exceeded", statusMessage: undefined });
   };
 
   const runConcurrentGeneration = async (scenesToGenerate: Scene[]) => {
     setIsGeneratingAll(true);
-    
-    // Concurrency Limit: 3
     const CONCURRENCY_LIMIT = 3;
     const queue = [...scenesToGenerate];
     const activePromises: Promise<void>[] = [];
@@ -205,25 +208,17 @@ const App: React.FC = () => {
       if (!scene) return;
 
       const promise = generateSingleImageWithRetry(scene.id, scene.imagePrompt).finally(() => {
-        // Remove self from active list
         activePromises.splice(activePromises.indexOf(promise), 1);
       });
-      
       activePromises.push(promise);
       await promise; 
-      
-      if (queue.length > 0) {
-        await processNext();
-      }
+      if (queue.length > 0) await processNext();
     };
 
-    // Start initial batch of workers
     const workers = [];
     for (let i = 0; i < Math.min(CONCURRENCY_LIMIT, queue.length); i++) {
       workers.push(processNext());
     }
-
-    // Wait for all worker chains to complete
     await Promise.all(workers);
     setIsGeneratingAll(false);
   };
@@ -239,7 +234,6 @@ const App: React.FC = () => {
 
   const handleRegenerateFailed = async () => {
     const failedScenes = scenes.filter(s => s.error || (s.imageUrl && s.imageUrl.includes('text=Generation+Failed')));
-    // Reset errors before starting
     failedScenes.forEach(s => updateScene(s.id, { error: undefined, statusMessage: "Queued..." }));
     await runConcurrentGeneration(failedScenes);
   };
@@ -262,48 +256,106 @@ const App: React.FC = () => {
     );
   }
 
+  const steps = [
+    { id: 'input', label: '1. Topic or Script' },
+    { id: 'editor', label: '2. Refine Script' },
+    { id: 'visuals', label: '3. Visual Storyboard' },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-gray-100 flex flex-col font-sans text-gray-800">
       <Header />
 
-      <main className="flex-grow max-w-[1400px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+      {/* STEPPER NAVIGATION */}
+      <div className="bg-white border-b border-gray-200 sticky top-[64px] z-30 shadow-sm">
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="flex justify-between items-center h-16">
+            {steps.map((step, index) => {
+              const isActive = currentStep === step.id;
+              const isPast = steps.findIndex(s => s.id === currentStep) > index;
+              const isFuture = steps.findIndex(s => s.id === currentStep) < index;
+              
+              return (
+                <div 
+                  key={step.id} 
+                  className={`flex items-center ${isFuture ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  onClick={() => {
+                    if (!isFuture) setCurrentStep(step.id as Step);
+                  }}
+                >
+                  <div className={`
+                    flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all
+                    ${isActive ? 'bg-black text-white shadow-md transform scale-105' : ''}
+                    ${isPast ? 'text-green-600 hover:bg-green-50' : ''}
+                    ${isFuture ? 'text-gray-400' : ''}
+                    ${!isActive && !isFuture && !isPast ? 'text-gray-600' : ''}
+                  `}>
+                    {isPast ? <CheckCircleIcon className="w-5 h-5" /> : null}
+                    <span>{step.label}</span>
+                  </div>
+                  
+                  {index < steps.length - 1 && (
+                     <div className="w-8 h-px bg-gray-300 mx-2 hidden sm:block"></div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <main className="flex-grow w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {scenes.length === 0 && (
-          <div className="mb-8 text-center max-w-2xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Storyboard Studio</h2>
-            <p className="text-gray-600">
-              Paste your script. We'll break it down into 30+ scenes. You can generate text assets and visuals on demand.
-            </p>
+        {/* STEP 1: INPUT */}
+        {currentStep === 'input' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
+            <div className="text-center mb-8">
+               <h2 className="text-3xl font-black text-gray-900 mb-2">Let's Start Creating</h2>
+               <p className="text-lg text-gray-600">Enter a topic to generate a script, or paste your own.</p>
+            </div>
+            <ScriptInput 
+              onAnalyze={(script) => handleScriptReady(script)} 
+              isAnalyzing={false} // No longer analyzing here, just passing data
+            />
           </div>
         )}
 
-        {scenes.length === 0 && (
-          <ScriptInput 
-            onAnalyze={handleAnalysis} 
-            isAnalyzing={appState === AppState.ANALYZING} 
-          />
-        )}
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-8">
-            {error}
+        {/* STEP 2: EDITOR */}
+        {currentStep === 'editor' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto">
+             <ScriptEditor 
+                script={fullScript}
+                onChange={setFullScript}
+                onUpdateStoryboard={() => handleAnalyzeFromEditor(fullScript)}
+                isUpdating={appState === AppState.ANALYZING}
+              />
           </div>
         )}
 
-        {scenes.length > 0 && (
-          <SceneDashboard 
-            scenes={scenes}
-            onGenerateImage={handleGenerateSingleImage}
-            onRefinePrompt={handleRefinePrompt}
-            onUpdatePrompt={handleUpdatePrompt}
-            onGenerateAll={handleGenerateAll}
-            onRegenerateFailed={handleRegenerateFailed}
-            onGenerateTextOverlay={handleGenerateTextOverlay}
-            onGenerateAllText={handleGenerateAllTextAssets}
-            isGeneratingAll={isGeneratingAll}
-            isGeneratingAllText={isGeneratingAllText}
-          />
+        {/* STEP 3: VISUALS */}
+        {currentStep === 'visuals' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+             {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-3">
+                <div className="font-bold">Error:</div> {error}
+              </div>
+            )}
+            
+            <SceneDashboard 
+              scenes={scenes}
+              onGenerateImage={handleGenerateSingleImage}
+              onRefinePrompt={handleRefinePrompt}
+              onUpdatePrompt={handleUpdatePrompt}
+              onGenerateAll={handleGenerateAll}
+              onRegenerateFailed={handleRegenerateFailed}
+              onGenerateTextOverlay={handleGenerateTextOverlay}
+              onGenerateAllText={handleGenerateAllTextAssets}
+              isGeneratingAll={isGeneratingAll}
+              isGeneratingAllText={isGeneratingAllText}
+            />
+          </div>
         )}
+
       </main>
     </div>
   );

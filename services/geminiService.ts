@@ -30,6 +30,40 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 3, baseDelay = 2
   throw new Error("Max retries exceeded");
 };
 
+export const rewriteText = async (text: string, mode: 'funny' | 'concise' | 'detailed' | 'professional'): Promise<string> => {
+  const ai = getClient();
+  
+  let instruction = "";
+  switch (mode) {
+    case 'funny': instruction = "Make this text funnier, wittier, and more like an internet meme script."; break;
+    case 'concise': instruction = "Shorten this text. Keep the core meaning but remove fluff."; break;
+    case 'detailed': instruction = "Expand on this text. Add more context and details."; break;
+    case 'professional': instruction = "Make this text sound more professional and authoritative."; break;
+  }
+
+  const prompt = `
+    Rewrite the following text segment for a YouTube video script.
+    
+    Instruction: ${instruction}
+    
+    Original Text:
+    "${text}"
+    
+    Return ONLY the rewritten text. Do not add quotes or explanations.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+    });
+    return response.text?.trim() || text;
+  } catch (e) {
+    console.error("Failed to rewrite text", e);
+    throw e;
+  }
+};
+
 export const refinePrompt = async (currentPrompt: string): Promise<string> => {
   const ai = getClient();
   
@@ -47,6 +81,44 @@ export const refinePrompt = async (currentPrompt: string): Promise<string> => {
   } catch (e) {
     console.error("Failed to refine prompt", e);
     return currentPrompt;
+  }
+};
+
+export const generateScriptFromTopic = async (topic: string, duration: string): Promise<string> => {
+  const ai = getClient();
+  
+  let lengthInstruction = "Keep it concise (approx 1 minute read time, ~150-200 words).";
+  if (duration === "8-12 min") {
+    lengthInstruction = "Make it detailed and in-depth (approx 8-12 minutes read time, ~1500-2000 words).";
+  } else if (duration === "15 min") {
+    lengthInstruction = "Make it an extensive deep dive (approx 15 minutes read time, ~2500+ words).";
+  }
+
+  const prompt = `
+    You are a professional YouTube scriptwriter for a fast-paced, "MS Paint" style explanation channel (like Casually Explained or Sam O'Nella).
+    
+    Task: Write a complete script about "${topic}".
+    Duration: ${duration}.
+    Instruction: ${lengthInstruction}
+    
+    Requirements:
+    - Highly engaging, funny, and conversational.
+    - Break complex ideas into simple terms.
+    - Write ONLY the spoken word (voiceover). Do not include scene descriptions or visual cues in this output.
+    - Use short, punchy sentences.
+  `;
+
+  try {
+    const response = await callWithRetry(async () => {
+      return await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+    });
+    return response.text?.trim() || "";
+  } catch (e) {
+    console.error("Failed to generate script from topic", e);
+    throw e;
   }
 };
 

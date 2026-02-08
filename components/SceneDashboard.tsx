@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Scene } from '../types';
-import { PhotoIcon, SparklesIcon, ArrowPathIcon, PaintBrushIcon, ArrowDownTrayIcon, PlusIcon, DocumentTextIcon, QueueListIcon, ArchiveBoxArrowDownIcon, ExclamationTriangleIcon, ClockIcon, ClipboardDocumentIcon } from '@heroicons/react/24/solid';
+import { PhotoIcon, SparklesIcon, ArrowPathIcon, PaintBrushIcon, ArrowDownTrayIcon, PlusIcon, DocumentTextIcon, QueueListIcon, ArchiveBoxArrowDownIcon, ExclamationTriangleIcon, ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/solid';
 import JSZip from 'jszip';
 
 interface SceneDashboardProps {
@@ -30,7 +30,11 @@ const SceneDashboard: React.FC<SceneDashboardProps> = ({
 }) => {
   const [isZipping, setIsZipping] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [isVoiceoverCopied, setIsVoiceoverCopied] = useState(false);
   
+  // Calculate full voiceover from scenes
+  const fullVoiceover = scenes.map(s => s.narration).join('\n\n');
+
   const handleDownload = (imageUrl: string, filename: string) => {
     const link = document.createElement('a');
     link.href = imageUrl;
@@ -44,6 +48,12 @@ const SceneDashboard: React.FC<SceneDashboardProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const handleCopyVoiceover = () => {
+    navigator.clipboard.writeText(fullVoiceover);
+    setIsVoiceoverCopied(true);
+    setTimeout(() => setIsVoiceoverCopied(false), 2000);
   };
 
   const handleDownloadZip = async () => {
@@ -64,18 +74,13 @@ const SceneDashboard: React.FC<SceneDashboardProps> = ({
 
       const promises = generatedScenes.map(async (scene, index) => {
         if (!scene.imageUrl) return;
-        
-        // Convert Base64 or URL to Blob
         const response = await fetch(scene.imageUrl);
         const blob = await response.blob();
-        
-        // Pad numbers (e.g., scene_001.png) so they sort correctly
         const fileName = `scene_${(index + 1).toString().padStart(3, '0')}.png`;
         folder.file(fileName, blob);
       });
 
       await Promise.all(promises);
-
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
@@ -97,23 +102,23 @@ const SceneDashboard: React.FC<SceneDashboardProps> = ({
   const hasFailedImages = scenes.some(s => s.error || (s.imageUrl && s.imageUrl.includes('text=Generation+Failed')));
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-12">
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden mb-12">
+      
       {/* Dashboard Toolbar */}
-      <div className="bg-gray-50 border-b border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center sticky top-16 z-20 gap-4">
+      <div className="bg-white border-b border-gray-200 p-6 flex flex-col md:flex-row justify-between items-center sticky top-[128px] z-20 gap-4 shadow-sm">
         <div className="flex items-center gap-4">
-           <h2 className="text-lg font-bold text-gray-800">Storyboard Dashboard</h2>
-           <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
-             {scenes.length} Scenes
+           <h2 className="text-2xl font-black text-gray-900 tracking-tight">Generated Scenes</h2>
+           <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold border border-gray-200">
+             {scenes.length} Frames
            </span>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {hasFailedImages && (
             <button
               onClick={onRegenerateFailed}
               disabled={isGeneratingAll}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-white shadow-sm transition-all bg-red-600 hover:bg-red-700 animate-pulse"
-              title="Retry generating failed images"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-sm text-white shadow-sm transition-all bg-red-600 hover:bg-red-700 active:scale-95"
             >
               <ExclamationTriangleIcon className="w-4 h-4" />
               Retry Failed
@@ -121,238 +126,222 @@ const SceneDashboard: React.FC<SceneDashboardProps> = ({
           )}
 
           <button
+            onClick={onGenerateAllText}
+            disabled={isGeneratingAllText}
+             className={`
+              flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-sm transition-all border
+              ${isGeneratingAllText ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 hover:border-blue-300 shadow-sm'}
+            `}
+          >
+             {isGeneratingAllText ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <QueueListIcon className="w-4 h-4" />}
+             Gen All Text
+          </button>
+
+          <button
             onClick={onGenerateAll}
             disabled={isGeneratingAll || scenes.length === 0}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-white shadow-sm transition-all
+              flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm text-white shadow-md transition-all active:scale-95
               ${isGeneratingAll ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}
             `}
           >
             {isGeneratingAll ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <PaintBrushIcon className="w-4 h-4" />}
-            Generate All
+            Generate All Images
           </button>
 
           <button
             onClick={handleDownloadZip}
             disabled={isZipping || scenes.every(s => !s.imageUrl)}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-white shadow-sm transition-all
-              ${isZipping || scenes.every(s => !s.imageUrl) ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-800 hover:bg-gray-900'}
+              flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm text-white shadow-md transition-all active:scale-95
+              ${isZipping || scenes.every(s => !s.imageUrl) ? 'bg-gray-400 cursor-not-allowed' : 'bg-black hover:bg-gray-800'}
             `}
-            title="Download all generated images as a .zip file"
           >
             {isZipping ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <ArchiveBoxArrowDownIcon className="w-4 h-4" />}
-            {isZipping ? 'Zipping...' : 'Download ZIP'}
+            Download ZIP
           </button>
         </div>
       </div>
 
-      {/* Table Header */}
-      <div className="grid grid-cols-12 gap-0 border-b border-gray-200 bg-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-[136px] sm:top-[88px] z-20">
-        <div className="col-span-1 p-3 text-center border-r border-gray-200">#</div>
-        <div className="col-span-4 p-3 border-r border-gray-200 flex justify-between items-center">
-            <span>Script & Text Assets</span>
-            <button 
-              onClick={onGenerateAllText}
-              disabled={isGeneratingAllText}
-              className={`
-                 text-[10px] px-3 py-1.5 rounded-full flex items-center gap-1 normal-case font-bold border transition-all
-                 ${isGeneratingAllText 
-                   ? 'bg-gray-100 text-gray-400 border-gray-200' 
-                   : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 shadow-sm'}
-              `}
-              title="Generate text cards for all scenes"
-            >
-               {isGeneratingAllText ? <ArrowPathIcon className="w-3 h-3 animate-spin" /> : <QueueListIcon className="w-3 h-3" />}
-               {isGeneratingAllText ? 'Generating...' : 'Create All Assets'}
-            </button>
-        </div>
-        <div className="col-span-4 p-3 border-r border-gray-200">Prompt Studio</div>
-        <div className="col-span-3 p-3">Visual Output (16:9)</div>
-      </div>
-
-      {/* Rows */}
-      <div className="divide-y divide-gray-200">
+      {/* Grid Layout */}
+      <div className="bg-gray-50 p-4 sm:p-6 space-y-6">
         {scenes.map((scene, index) => (
-          <div key={scene.id} className="grid grid-cols-12 gap-0 hover:bg-gray-50 transition-colors">
+          <div key={scene.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-row">
             
-            {/* ID Column */}
-            <div className="col-span-1 p-4 flex items-center justify-center font-mono text-gray-400 font-bold border-r border-gray-200">
-              {index + 1}
+            {/* Header / ID (Mobile only) */}
+            <div className="lg:hidden p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center font-bold text-gray-500">
+               <span>Scene #{index + 1}</span>
             </div>
 
-            {/* Column 1: Script & Text Visualization */}
-            <div className="col-span-4 p-4 border-r border-gray-200 flex flex-col gap-4">
-              <div className="bg-yellow-50 p-2 rounded border border-yellow-200">
-                <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Narration</span>
-                <p className="text-sm text-gray-800 leading-relaxed font-medium">
+            {/* Left Column: ID & Script */}
+            <div className="lg:w-1/4 p-6 border-b lg:border-b-0 lg:border-r border-gray-100 flex flex-col gap-4">
+               <div className="hidden lg:flex items-center gap-2 mb-2">
+                 <span className="bg-gray-900 text-white text-xs font-bold px-2 py-1 rounded">#{index + 1}</span>
+                 <span className="text-xs font-bold text-gray-400 uppercase">Narration</span>
+               </div>
+               
+               <p className="text-lg text-gray-800 leading-relaxed font-serif">
                   "{scene.narration}"
-                </p>
-              </div>
-              
-              {/* Text Overlay Section */}
-              <div className="mt-2">
-                 <div className="flex justify-between items-center mb-1">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase">Text Card Asset</span>
-                 </div>
-                 
-                 {scene.textOverlay ? (
-                   <>
-                     {/* The Card: White, clean, high contrast, professional */}
-                     <div className="bg-white border-4 border-black p-6 aspect-video shadow-md flex flex-col justify-center items-center text-center overflow-hidden transform transition-transform hover:scale-[1.02]">
+               </p>
+
+               {/* Text Asset Mini-Card */}
+               <div className="mt-auto pt-4">
+                  <div className="flex justify-between items-center mb-2">
+                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Text Overlay Asset</span>
+                  </div>
+                   {scene.textOverlay ? (
+                     <div className="bg-white border-2 border-black p-3 aspect-video shadow-sm flex flex-col justify-center items-center text-center overflow-hidden transform scale-95 origin-left">
                         {scene.textOverlay.heading && (
-                          <div className="font-sans font-black text-black text-2xl uppercase leading-none mb-3 tracking-tighter">
+                          <div className="font-sans font-black text-black text-xs uppercase leading-none mb-1">
                             {scene.textOverlay.heading}
                           </div>
                         )}
                         {scene.textOverlay.points && (
                           <div className="w-full text-center">
                             {scene.textOverlay.points.map((p, i) => (
-                              <div key={i} className="font-hand text-black text-3xl font-bold leading-tight mb-1">
+                              <div key={i} className="font-hand text-black text-sm font-bold leading-tight">
                                 {p}
                               </div>
                             ))}
                           </div>
                         )}
                      </div>
-                     <p className="text-[10px] text-gray-400 mt-2 text-center italic">
-                       Ready for screenshot
-                     </p>
-                   </>
-                 ) : (
-                    <button 
-                      onClick={() => onGenerateTextOverlay(scene.id, scene.narration)}
-                      disabled={scene.isLoadingTextOverlay}
-                      className="w-full aspect-video border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400 hover:bg-gray-50 hover:border-blue-300 hover:text-blue-500 transition-all group"
-                    >
-                      {scene.isLoadingTextOverlay ? (
-                        <>
-                          <ArrowPathIcon className="w-6 h-6 animate-spin mb-2" />
-                          <span className="text-xs font-bold">Designing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <DocumentTextIcon className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
-                          <span className="text-xs font-bold flex items-center gap-1">
-                            <PlusIcon className="w-3 h-3" /> Create Text Asset
-                          </span>
-                        </>
-                      )}
-                    </button>
-                 )}
-              </div>
+                   ) : (
+                      <button 
+                        onClick={() => onGenerateTextOverlay(scene.id, scene.narration)}
+                        disabled={scene.isLoadingTextOverlay}
+                        className="w-full aspect-video border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center text-gray-400 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-500 transition-all"
+                      >
+                        {scene.isLoadingTextOverlay ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : <PlusIcon className="w-5 h-5" />}
+                        <span className="text-[10px] font-bold mt-1">Create Text Asset</span>
+                      </button>
+                   )}
+               </div>
             </div>
 
-            {/* Column 2: Prompt Studio */}
-            <div className="col-span-4 p-4 border-r border-gray-200 flex flex-col h-full">
-              <div className="flex justify-between items-center mb-2">
-                 <span className="text-xs font-bold text-gray-400 uppercase">Image Prompt</span>
-                 <div className="flex items-center gap-2">
+            {/* Middle Column: Prompt Studio */}
+            <div className="lg:w-1/4 p-6 border-b lg:border-b-0 lg:border-r border-gray-100 bg-gray-50/50">
+               <div className="flex justify-between items-center mb-3">
+                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Image Prompt</span>
+                 <div className="flex gap-1">
                    <button 
                      onClick={() => handleCopyPrompt(scene.id, scene.imagePrompt)}
-                     className={`
-                       text-xs flex items-center gap-1 font-bold px-2 py-1 rounded border transition-all
-                       ${copiedId === scene.id 
-                         ? 'bg-green-50 border-green-200 text-green-600' 
-                         : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900'}
-                     `}
-                     title="Copy prompt to clipboard"
+                     className="p-1.5 hover:bg-gray-200 rounded text-gray-500 transition-colors"
+                     title="Copy"
                    >
-                     {copiedId === scene.id ? (
-                        <span>Copied!</span>
-                     ) : (
-                        <>
-                          <ClipboardDocumentIcon className="w-3 h-3" />
-                          Copy
-                        </>
-                     )}
+                     {copiedId === scene.id ? <CheckIcon className="w-4 h-4 text-green-500" /> : <ClipboardDocumentIcon className="w-4 h-4" />}
                    </button>
                    <button 
                      onClick={() => onRefinePrompt(scene.id, scene.imagePrompt)}
                      disabled={scene.isRefining}
-                     className="text-xs flex items-center gap-1 text-purple-600 hover:text-purple-800 font-bold bg-purple-50 px-2 py-1 rounded hover:bg-purple-100 transition-colors disabled:opacity-50 disabled:cursor-wait"
-                     title="Use AI to rewrite and improve this prompt"
+                     className="p-1.5 hover:bg-purple-100 text-purple-600 rounded transition-colors disabled:opacity-50"
+                     title="AI Rewrite"
                    >
-                     {scene.isRefining ? <ArrowPathIcon className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
-                     {scene.isRefining ? 'Rewriting...' : 'Auto-Rewrite'}
+                     {scene.isRefining ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <SparklesIcon className="w-4 h-4" />}
                    </button>
                  </div>
-              </div>
-              <textarea 
-                value={scene.imagePrompt}
-                onChange={(e) => onUpdatePrompt(scene.id, e.target.value)}
-                className="w-full flex-grow text-xs p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-400 focus:border-transparent font-mono text-gray-600 leading-relaxed resize-none bg-gray-50 min-h-[140px]"
-              />
-              <div className="mt-2 text-[10px] text-gray-400">
-                Tip: If the image has a toolbar, add "NO UI" to the prompt.
-              </div>
+               </div>
+               <textarea 
+                  value={scene.imagePrompt}
+                  onChange={(e) => onUpdatePrompt(scene.id, e.target.value)}
+                  className="w-full h-40 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-none bg-white text-gray-700 leading-relaxed"
+                />
             </div>
 
-            {/* Column 3: Visual Output */}
-            <div className="col-span-3 p-4 flex flex-col items-center justify-start">
-              <div className={`w-full aspect-video bg-white border-2 border-dashed rounded-lg overflow-hidden relative mb-3 group ${scene.error ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}>
-                {scene.imageUrl ? (
-                  <>
-                    <img 
-                      src={scene.imageUrl} 
-                      alt="Generated" 
-                      className="w-full h-full object-contain bg-white"
-                    />
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => handleDownload(scene.imageUrl!, `scene-${index + 1}.png`)}
-                        className="bg-white p-2 rounded-full shadow-lg border border-gray-200 hover:bg-gray-100 text-blue-600"
-                        title="Download Image"
-                      >
-                        <ArrowDownTrayIcon className="w-5 h-5" />
-                      </button>
+            {/* Right Column: Visual Output */}
+            <div className="lg:w-1/2 p-6 flex flex-col items-center justify-center bg-gray-100/30">
+                <div className={`w-full aspect-video bg-white border-2 border-dashed rounded-lg overflow-hidden relative mb-4 group shadow-sm ${scene.error ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}>
+                  {scene.imageUrl ? (
+                    <>
+                      <img 
+                        src={scene.imageUrl} 
+                        alt="Generated" 
+                        className="w-full h-full object-contain bg-white"
+                      />
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => handleDownload(scene.imageUrl!, `scene-${index + 1}.png`)}
+                          className="bg-white p-2 rounded-full shadow-lg border border-gray-200 hover:bg-gray-100 text-blue-600 transition-transform hover:scale-110"
+                          title="Download Image"
+                        >
+                          <ArrowDownTrayIcon className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </>
+                  ) : scene.isLoadingImage ? (
+                    <div className="flex flex-col items-center justify-center h-full text-blue-500 bg-blue-50 p-4 text-center">
+                      <ArrowPathIcon className="w-8 h-8 animate-spin mb-3" />
+                      {scene.statusMessage ? (
+                        <span className="text-sm font-bold text-amber-600 animate-pulse">{scene.statusMessage}</span>
+                      ) : (
+                        <span className="text-sm font-bold">Painting...</span>
+                      )}
                     </div>
-                  </>
-                ) : scene.isLoadingImage ? (
-                  <div className="flex flex-col items-center justify-center h-full text-blue-500 bg-blue-50 p-4 text-center">
-                    <ArrowPathIcon className="w-8 h-8 animate-spin mb-2" />
-                    {scene.statusMessage ? (
-                      <span className="text-xs font-bold text-amber-600 animate-pulse">{scene.statusMessage}</span>
-                    ) : (
-                      <span className="text-xs font-bold">Painting...</span>
-                    )}
-                  </div>
-                ) : scene.error ? (
-                  <div className="flex flex-col items-center justify-center h-full text-red-400">
-                    <ExclamationTriangleIcon className="w-8 h-8 mb-2" />
-                    <span className="text-xs font-bold">Failed</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-300">
-                    <PhotoIcon className="w-10 h-10 mb-2" />
-                    <span className="text-xs">No Image</span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex gap-2 w-full">
-                <button
-                  onClick={() => onGenerateImage(scene.id, scene.imagePrompt)}
-                  disabled={scene.isLoadingImage}
-                  className={`flex-1 py-2 text-white text-xs font-bold rounded shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed ${scene.error ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'}`}
-                >
-                  {scene.imageUrl ? 'Regenerate' : (scene.error ? 'Retry' : 'Create Image')}
-                </button>
-                {scene.imageUrl && (
-                   <button 
-                    onClick={() => handleDownload(scene.imageUrl!, `scene-${index + 1}.png`)}
-                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300"
-                    title="Download"
-                   >
-                     <ArrowDownTrayIcon className="w-4 h-4" />
-                   </button>
-                )}
-              </div>
+                  ) : scene.error ? (
+                    <div className="flex flex-col items-center justify-center h-full text-red-400">
+                      <ExclamationTriangleIcon className="w-10 h-10 mb-2" />
+                      <span className="text-sm font-bold">Failed</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-300">
+                      <PhotoIcon className="w-12 h-12 mb-2" />
+                      <span className="text-sm font-medium">Ready to Generate</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="w-full flex justify-end">
+                   <button
+                    onClick={() => onGenerateImage(scene.id, scene.imagePrompt)}
+                    disabled={scene.isLoadingImage}
+                    className={`
+                      px-6 py-2 rounded-lg font-bold text-sm text-white shadow-sm transition-all transform active:scale-95
+                      ${scene.error 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : scene.imageUrl ? 'bg-gray-800 hover:bg-gray-900' : 'bg-blue-600 hover:bg-blue-700'}
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                    `}
+                  >
+                    {scene.imageUrl ? 'Regenerate' : (scene.error ? 'Retry' : 'Generate Image')}
+                  </button>
+                </div>
             </div>
 
           </div>
         ))}
       </div>
+      
+      {/* Footer Script View */}
+       <div className="bg-white border-t border-gray-200 p-8 flex flex-col md:flex-row gap-6 justify-between items-start">
+         <div className="flex items-start gap-3">
+             <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
+               <DocumentTextIcon className="w-6 h-6" />
+             </div>
+             <div>
+               <h3 className="text-lg font-bold text-gray-900">Full Voiceover Script</h3>
+               <p className="text-sm text-gray-500">Copy this for your narration.</p>
+             </div>
+         </div>
+         <div className="w-full md:w-2/3 flex flex-col items-end gap-2">
+            <textarea 
+               readOnly
+               value={fullVoiceover}
+               className="w-full h-32 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium resize-none focus:outline-none"
+            />
+            <button
+              onClick={handleCopyVoiceover}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-all border ${
+                isVoiceoverCopied 
+                  ? 'bg-green-50 text-green-700 border-green-200' 
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {isVoiceoverCopied ? <CheckIcon className="w-4 h-4" /> : <ClipboardDocumentIcon className="w-4 h-4" />}
+              {isVoiceoverCopied ? 'Copied!' : 'Copy Script'}
+            </button>
+         </div>
+       </div>
+
     </div>
   );
 };
