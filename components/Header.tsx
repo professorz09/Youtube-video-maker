@@ -1,20 +1,69 @@
 import React from 'react';
-import { PaintBrushIcon } from '@heroicons/react/24/solid';
 
-const Header: React.FC = () => {
+interface HeaderProps {
+  currentStep: string;
+}
+
+const Header: React.FC<HeaderProps> = ({ currentStep }) => {
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="bg-blue-600 p-2 rounded-lg text-white transform rotate-2 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-            <PaintBrushIcon className="w-5 h-5" />
+    <header style={{
+      background: 'rgba(10, 10, 15, 0.85)',
+      backdropFilter: 'blur(20px)',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
+      position: 'sticky',
+      top: 0,
+      zIndex: 50,
+    }}>
+      <div style={{
+        maxWidth: '1400px',
+        margin: '0 auto',
+        padding: '0 24px',
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+            borderRadius: '10px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '18px',
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="23 7 16 12 23 17 23 7" />
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 font-sans">
-            Paint<span className="text-blue-600">Visualizer</span>
-          </h1>
+          <div>
+            <h1 style={{
+              fontSize: '18px',
+              fontWeight: '800',
+              margin: 0,
+              letterSpacing: '-0.5px',
+            }}>
+              <span style={{ color: '#f0f0f5' }}>Video</span>
+              <span className="gradient-text">Forge</span>
+              <span style={{ color: '#6b7280', fontWeight: 500, fontSize: '13px', marginLeft: '6px' }}>AI</span>
+            </h1>
+          </div>
         </div>
-        <div className="text-sm font-bold text-gray-500 font-hand text-lg rotate-1">
-          Make it MS Paint Style!
+
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <span className="badge badge-purple">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            Gemini + ElevenLabs
+          </span>
         </div>
       </div>
     </header>

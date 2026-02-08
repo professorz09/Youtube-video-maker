@@ -1,14 +1,6 @@
-import React, { useState, useRef } from 'react';
-import { 
-  SparklesIcon, 
-  ArrowPathIcon, 
-  ChatBubbleBottomCenterTextIcon, 
-  ScissorsIcon,
-  FaceSmileIcon,
-  BriefcaseIcon,
-  PlayCircleIcon
-} from '@heroicons/react/24/solid';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { rewriteText } from '../services/geminiService';
+import { ScriptBlock } from '../types';
 
 interface ScriptEditorProps {
   script: string;
@@ -18,140 +10,433 @@ interface ScriptEditorProps {
 }
 
 const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, onChange, onUpdateStoryboard, isUpdating }) => {
-  const [isRewriting, setIsRewriting] = useState(false);
+  const [blocks, setBlocks] = useState<ScriptBlock[]>([]);
+  const [rewritingBlockId, setRewritingBlockId] = useState<string | null>(null);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [fullEditMode, setFullEditMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleRewrite = async (mode: 'funny' | 'concise' | 'detailed' | 'professional') => {
-    if (!textareaRef.current) return;
+  // Parse script into blocks
+  useEffect(() => {
+    const paragraphs = script.split('\n\n').filter(p => p.trim());
+    const newBlocks: ScriptBlock[] = paragraphs.map((text, i) => ({
+      id: `block-${i}`,
+      text: text.trim(),
+      isEditing: false,
+    }));
+    setBlocks(newBlocks);
+  }, [script]);
 
-    const textarea = textareaRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
+  // Sync blocks back to script
+  const syncBlocksToScript = useCallback((updatedBlocks: ScriptBlock[]) => {
+    const newScript = updatedBlocks.map(b => b.text).join('\n\n');
+    onChange(newScript);
+  }, [onChange]);
 
-    if (start === end) {
-      alert("Please select a sentence or paragraph to rewrite.");
-      return;
-    }
+  const handleBlockTextChange = (blockId: string, newText: string) => {
+    const updated = blocks.map(b => b.id === blockId ? { ...b, text: newText } : b);
+    setBlocks(updated);
+    syncBlocksToScript(updated);
+  };
 
-    const selectedText = script.substring(start, end);
-    setIsRewriting(true);
+  const handleRewriteBlock = async (blockId: string, mode: 'funny' | 'concise' | 'detailed' | 'professional') => {
+    const block = blocks.find(b => b.id === blockId);
+    if (!block) return;
 
+    setRewritingBlockId(blockId);
     try {
-      const rewritten = await rewriteText(selectedText, mode);
-      const newScript = script.substring(0, start) + rewritten + script.substring(end);
-      onChange(newScript);
+      const rewritten = await rewriteText(block.text, mode);
+      const updated = blocks.map(b => b.id === blockId ? { ...b, text: rewritten } : b);
+      setBlocks(updated);
+      syncBlocksToScript(updated);
     } catch (error) {
       console.error("Rewrite failed", error);
-      alert("Failed to rewrite text. Try again.");
     } finally {
-      setIsRewriting(false);
+      setRewritingBlockId(null);
     }
   };
 
+  const handleDeleteBlock = (blockId: string) => {
+    const updated = blocks.filter(b => b.id !== blockId);
+    setBlocks(updated);
+    syncBlocksToScript(updated);
+  };
+
+  const handleAddBlock = (afterId: string) => {
+    const idx = blocks.findIndex(b => b.id === afterId);
+    const newBlock: ScriptBlock = {
+      id: `block-${Date.now()}`,
+      text: '',
+      isEditing: true,
+    };
+    const updated = [...blocks];
+    updated.splice(idx + 1, 0, newBlock);
+    setBlocks(updated);
+    setActiveBlockId(newBlock.id);
+  };
+
+  const handleMoveBlock = (blockId: string, direction: 'up' | 'down') => {
+    const idx = blocks.findIndex(b => b.id === blockId);
+    if (direction === 'up' && idx > 0) {
+      const updated = [...blocks];
+      [updated[idx - 1], updated[idx]] = [updated[idx], updated[idx - 1]];
+      setBlocks(updated);
+      syncBlocksToScript(updated);
+    } else if (direction === 'down' && idx < blocks.length - 1) {
+      const updated = [...blocks];
+      [updated[idx], updated[idx + 1]] = [updated[idx + 1], updated[idx]];
+      setBlocks(updated);
+      syncBlocksToScript(updated);
+    }
+  };
+
+  const wordCount = script.split(/\s+/).filter(w => w.length > 0).length;
+
+  const rewriteTools = [
+    { mode: 'funny' as const, label: 'Funny', icon: '😄', color: '#a78bfa' },
+    { mode: 'concise' as const, label: 'Shorten', icon: '✂️', color: '#3b82f6' },
+    { mode: 'detailed' as const, label: 'Expand', icon: '📝', color: '#10b981' },
+    { mode: 'professional' as const, label: 'Pro', icon: '💼', color: '#f59e0b' },
+  ];
+
   return (
-    <div className="flex flex-col h-[calc(100vh-200px)] min-h-[600px] gap-4">
-      
-      {/* Header / Info */}
-      <div className="flex justify-between items-end px-2">
+    <div className="animate-fadeInUp" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Header Bar */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '12px',
+      }}>
         <div>
-           <h2 className="text-2xl font-bold text-gray-900">Review & Edit Script</h2>
-           <p className="text-gray-500 text-sm">Select text to use AI rewrite tools.</p>
+          <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#f0f0f5', margin: '0 0 4px 0' }}>
+            Edit Script
+          </h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+            Click any paragraph to edit. Use AI tools to rewrite sections.
+          </p>
         </div>
-        <div className="text-sm font-mono text-gray-500 bg-white px-3 py-1 rounded-full border border-gray-200 shadow-sm">
-          {script.split(/\s+/).filter(w => w.length > 0).length} words
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span className="badge badge-blue">{wordCount} words</span>
+          <span className="badge badge-green">{blocks.length} paragraphs</span>
+          <button
+            className="btn-ghost"
+            onClick={() => setFullEditMode(!fullEditMode)}
+            style={{ fontSize: '12px' }}
+          >
+            {fullEditMode ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                Block View
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Full Edit
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden flex flex-col flex-grow relative">
-        
-        {/* Sticky Toolbar */}
-        <div className="bg-gray-50 border-b border-gray-200 p-3 flex flex-wrap gap-2 items-center sticky top-0 z-10">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">AI Tools</span>
-          
-          <div className="h-6 w-px bg-gray-300 mx-1"></div>
+      {/* Editor Area */}
+      <div className="glass-card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
-          <button
-            onClick={() => handleRewrite('funny')}
-            disabled={isRewriting}
-            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-50 hover:border-purple-200 transition-all shadow-sm active:scale-95"
-            title="Make selection funnier"
-          >
-            <FaceSmileIcon className="w-4 h-4" />
-            Make Funny
-          </button>
-
-          <button
-            onClick={() => handleRewrite('concise')}
-            disabled={isRewriting}
-            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-95"
-            title="Shorten selection"
-          >
-            <ScissorsIcon className="w-4 h-4" />
-            Shorten
-          </button>
-
-          <button
-            onClick={() => handleRewrite('detailed')}
-            disabled={isRewriting}
-            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-green-700 rounded-lg text-xs font-bold hover:bg-green-50 hover:border-green-200 transition-all shadow-sm active:scale-95"
-            title="Expand selection"
-          >
-            <ChatBubbleBottomCenterTextIcon className="w-4 h-4" />
-            Expand
-          </button>
-
-          <button
-            onClick={() => handleRewrite('professional')}
-            disabled={isRewriting}
-            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-100 hover:border-gray-300 transition-all shadow-sm active:scale-95"
-            title="Make selection professional"
-          >
-            <BriefcaseIcon className="w-4 h-4" />
-            Professional
-          </button>
-
-          {isRewriting && (
-            <span className="text-xs font-bold text-purple-600 flex items-center gap-2 ml-auto bg-purple-50 px-3 py-1 rounded-full animate-pulse border border-purple-100">
-              <SparklesIcon className="w-4 h-4" /> Rewriting...
-            </span>
-          )}
-        </div>
-
-        {/* Text Area (Document style) */}
-        <div className="flex-grow relative bg-gray-50 overflow-hidden flex justify-center">
-           <div className="w-full h-full max-w-3xl bg-white shadow-sm my-0 sm:my-4 sm:mx-4 overflow-hidden border-x sm:border border-gray-200">
+        {fullEditMode ? (
+          /* Full text editor mode */
+          <div style={{ padding: '24px' }}>
             <textarea
               ref={textareaRef}
               value={script}
               onChange={(e) => onChange(e.target.value)}
-              className="w-full h-full p-8 sm:p-12 resize-none focus:outline-none text-gray-800 font-serif text-lg leading-relaxed selection:bg-purple-100 selection:text-purple-900"
-              placeholder="Start writing..."
+              className="textarea-dark"
+              style={{
+                minHeight: '500px',
+                fontSize: '15px',
+                lineHeight: '1.8',
+                background: 'var(--bg-primary)',
+              }}
+              placeholder="Start writing your script..."
               spellCheck={false}
             />
-           </div>
-        </div>
+          </div>
+        ) : (
+          /* Block editor mode */
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {blocks.map((block, index) => (
+              <div
+                key={block.id}
+                className={`script-block ${activeBlockId === block.id ? 'editing' : ''}`}
+                onClick={() => setActiveBlockId(block.id)}
+                style={{ opacity: 1, animation: `fadeInUp 0.3s ease-out ${index * 0.03}s both` }}
+              >
+                {/* Block number */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                }}>
+                  <div style={{
+                    minWidth: '28px',
+                    height: '28px',
+                    borderRadius: '8px',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    color: '#3b82f6',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    marginTop: '2px',
+                  }}>
+                    {index + 1}
+                  </div>
 
-        {/* Action Footer */}
-        <div className="p-4 bg-white border-t border-gray-200 flex justify-end items-center z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {activeBlockId === block.id ? (
+                      <textarea
+                        value={block.text}
+                        onChange={(e) => handleBlockTextChange(block.id, e.target.value)}
+                        autoFocus
+                        style={{
+                          width: '100%',
+                          minHeight: '80px',
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#f0f0f5',
+                          fontSize: '14px',
+                          lineHeight: '1.7',
+                          resize: 'vertical',
+                          outline: 'none',
+                          fontFamily: 'inherit',
+                          padding: 0,
+                        }}
+                        onBlur={() => {
+                          if (block.text.trim() === '') {
+                            handleDeleteBlock(block.id);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <p style={{
+                        margin: 0,
+                        fontSize: '14px',
+                        lineHeight: '1.7',
+                        color: '#d1d5db',
+                        cursor: 'text',
+                        whiteSpace: 'pre-wrap',
+                      }}>
+                        {block.text || <span style={{ color: '#4b5563', fontStyle: 'italic' }}>Empty paragraph - click to edit</span>}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Block Toolbar - shows on active */}
+                {activeBlockId === block.id && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginTop: '12px',
+                    paddingTop: '12px',
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    flexWrap: 'wrap',
+                  }}>
+                    {/* AI Rewrite Tools */}
+                    <span style={{ fontSize: '10px', fontWeight: '700', color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '4px' }}>
+                      AI:
+                    </span>
+                    {rewriteTools.map(tool => (
+                      <button
+                        key={tool.mode}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRewriteBlock(block.id, tool.mode);
+                        }}
+                        disabled={rewritingBlockId === block.id}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          background: 'var(--bg-elevated)',
+                          color: tool.color,
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          transition: 'all 0.2s',
+                          opacity: rewritingBlockId === block.id ? 0.5 : 1,
+                        }}
+                      >
+                        <span>{tool.icon}</span>
+                        {tool.label}
+                      </button>
+                    ))}
+
+                    {rewritingBlockId === block.id && (
+                      <span style={{
+                        fontSize: '11px',
+                        color: '#a78bfa',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        marginLeft: '4px',
+                      }}>
+                        <div className="spinner-blue" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                        Rewriting...
+                      </span>
+                    )}
+
+                    {/* Spacer */}
+                    <div style={{ flex: 1 }} />
+
+                    {/* Move / Delete controls */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'up'); }}
+                      disabled={index === 0}
+                      style={{
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'transparent',
+                        color: index === 0 ? '#374151' : '#6b7280',
+                        cursor: index === 0 ? 'not-allowed' : 'pointer',
+                        fontSize: '12px',
+                      }}
+                      title="Move up"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'down'); }}
+                      disabled={index === blocks.length - 1}
+                      style={{
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'transparent',
+                        color: index === blocks.length - 1 ? '#374151' : '#6b7280',
+                        cursor: index === blocks.length - 1 ? 'not-allowed' : 'pointer',
+                        fontSize: '12px',
+                      }}
+                      title="Move down"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAddBlock(block.id); }}
+                      style={{
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'transparent',
+                        color: '#10b981',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                      }}
+                      title="Add paragraph below"
+                    >
+                      +
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                      style={{
+                        padding: '4px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'transparent',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                      }}
+                      title="Delete paragraph"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Add new paragraph button */}
+            <button
+              onClick={() => {
+                const newBlock: ScriptBlock = {
+                  id: `block-${Date.now()}`,
+                  text: '',
+                  isEditing: true,
+                };
+                const updated = [...blocks, newBlock];
+                setBlocks(updated);
+                setActiveBlockId(newBlock.id);
+              }}
+              style={{
+                padding: '14px',
+                borderRadius: '12px',
+                border: '2px dashed rgba(255,255,255,0.08)',
+                background: 'transparent',
+                color: '#4b5563',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+                e.currentTarget.style.color = '#3b82f6';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.color = '#4b5563';
+              }}
+            >
+              + Add Paragraph
+            </button>
+          </div>
+        )}
+
+        {/* Footer Action */}
+        <div style={{
+          padding: '16px 24px',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: 'rgba(0,0,0,0.2)',
+        }}>
+          <span style={{ fontSize: '12px', color: '#6b7280' }}>
+            {blocks.length} paragraphs / {wordCount} words
+          </span>
           <button
             onClick={onUpdateStoryboard}
             disabled={isUpdating}
-            className={`
-              flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg text-white shadow-lg transition-all
-              ${isUpdating 
-                ? 'bg-gray-400 cursor-not-allowed' 
-                : 'bg-black hover:bg-gray-800 hover:scale-105 active:scale-95 shadow-gray-400'}
-            `}
+            className="btn-primary"
+            style={{
+              padding: '12px 28px',
+              fontSize: '14px',
+              fontWeight: '700',
+            }}
           >
             {isUpdating ? (
               <>
-                <ArrowPathIcon className="w-6 h-6 animate-spin" />
+                <div className="spinner" />
                 Analyzing Script...
               </>
             ) : (
               <>
-                <PlayCircleIcon className="w-6 h-6 text-yellow-400" />
-                Generate Visual Storyboard
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Generate Storyboard
               </>
             )}
           </button>
